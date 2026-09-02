@@ -1,6 +1,14 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import migrationRunner from 'node-pg-migrate';
+
+// Resolve migrations relative to this file, not the current working directory.
+const migrationsDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../migrations',
+);
 
 // Modules imported dynamically AFTER env is configured (config caches on load).
 type Mods = {
@@ -32,7 +40,7 @@ beforeAll(async () => {
 
   await migrationRunner({
     databaseUrl: url,
-    dir: 'migrations',
+    dir: migrationsDir,
     direction: 'up',
     migrationsTable: 'pgmigrations',
     count: Infinity,
