@@ -1,0 +1,52 @@
+{
+  "name": "telegram-ingestor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "ingest-cli": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start:app": "node dist/entrypoints/app.js",
+    "start:ingestor": "node dist/entrypoints/ingestor.js",
+    "dev:app": "tsx watch src/entrypoints/app.ts",
+    "dev:ingestor": "tsx watch src/entrypoints/ingestor.ts",
+    "cli": "tsx src/cli/index.ts",
+    "migrate": "node-pg-migrate",
+    "migrate:up": "node-pg-migrate up",
+    "migrate:down": "node-pg-migrate down",
+    "lint": "eslint . --ext .ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/helmet": "^12.0.1",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.0",
+    "grammy": "^1.32.0",
+    "node-pg-migrate": "^7.9.0",
+    "pg": "^8.13.1",
+    "pino": "^9.6.0",
+    "teleproto": "^1.229.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^10.16.0",
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "@typescript-eslint/eslint-plugin": "^8.19.1",
+    "@typescript-eslint/parser": "^8.19.1",
+    "eslint": "^8.57.1",
+    "pino-pretty": "^13.0.0",
+    "testcontainers": "^10.16.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
