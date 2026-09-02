@@ -15,7 +15,7 @@ export interface ResolvedSource {
   title: string | null;
   username: string | null;
   isPrivate: boolean;
-  joinStatus: 'joined' | 'pending' | 'failed';
+  joinStatus: 'joined' | 'accessible' | 'pending' | 'failed';
   telegramMeta: Record<string, unknown>;
 }
 

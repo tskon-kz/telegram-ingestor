@@ -17,9 +17,11 @@ services:
   migrate:
     build: .
     env_file: .env
+    # Talk to the bundled postgres; the URL (with any special chars in the
+    # password) is built and URL-encoded by the app config, not by compose.
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    command: ["npx", "node-pg-migrate", "up"]
+      POSTGRES_HOST: postgres
+    command: ["node", "dist/entrypoints/migrate.js"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,7 +31,7 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
     command: ["node", "dist/entrypoints/app.js"]
     ports:
       # Exposed to the host so your external Caddy can reverse-proxy to it.
@@ -50,7 +52,7 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_HOST: postgres
     command: ["node", "dist/entrypoints/ingestor.js"]
     depends_on:
       postgres:

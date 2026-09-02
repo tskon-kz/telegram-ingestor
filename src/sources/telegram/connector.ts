@@ -39,11 +39,9 @@ export class TelegramConnector implements SourceConnector {
     if (!(entity instanceof Api.Channel)) {
       throw new Error('reference is not a channel');
     }
-    // Public channel: join so live updates are delivered.
-    await this.client
-      .invoke(new Api.channels.JoinChannel({ channel: entity }))
-      .catch(() => undefined);
-    return this.toResolved(entity, false);
+    // Public channel: read history without joining, so it doesn't clutter the
+    // account's chat list. access_hash from getEntity is enough for getMessages.
+    return this.toResolved(entity, false, 'accessible');
   }
 
   private async resolveInvite(hash: string): Promise<ResolvedSource> {
@@ -64,10 +62,14 @@ export class TelegramConnector implements SourceConnector {
       }
     }
     if (!channel) throw new Error('could not resolve private invite');
-    return this.toResolved(channel, true);
+    return this.toResolved(channel, true, 'joined');
   }
 
-  private toResolved(channel: Api.Channel, isPrivate: boolean): ResolvedSource {
+  private toResolved(
+    channel: Api.Channel,
+    isPrivate: boolean,
+    joinStatus: 'joined' | 'accessible',
+  ): ResolvedSource {
     const meta: ChannelMeta = {
       channelId: channel.id.toString(),
       accessHash: channel.accessHash?.toString() ?? '0',
@@ -77,7 +79,7 @@ export class TelegramConnector implements SourceConnector {
       title: channel.title ?? null,
       username: channel.username ?? null,
       isPrivate,
-      joinStatus: 'joined',
+      joinStatus,
       telegramMeta: meta as unknown as Record<string, unknown>,
     };
   }

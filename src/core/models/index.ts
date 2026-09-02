@@ -18,7 +18,8 @@ export interface UserQuotas {
 }
 
 export type SourceType = 'telegram_channel';
-export type JoinStatus = 'pending' | 'joined' | 'failed' | 'left';
+// 'accessible' = public channel we read without joining (not subscribed).
+export type JoinStatus = 'pending' | 'joined' | 'accessible' | 'failed' | 'left';
 export type SyncStatus = 'idle' | 'syncing' | 'error' | 'paused';
 
 export interface Source {

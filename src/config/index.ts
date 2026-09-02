@@ -58,6 +58,20 @@ function buildDatabaseUrl(c: z.infer<typeof schema>): string {
   return `postgres://${auth}@${c.POSTGRES_HOST}:${c.POSTGRES_PORT}/${c.POSTGRES_DB}`;
 }
 
+/**
+ * Build the DB URL straight from env (URL-encoding the password) without running
+ * the full app schema. Used by the migrate entrypoint, which only needs the DB.
+ */
+export function databaseUrlFromEnv(): string {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const host = process.env.POSTGRES_HOST || 'postgres';
+  const port = process.env.POSTGRES_PORT || '5432';
+  const db = process.env.POSTGRES_DB || 'telegram_ingestor';
+  const user = encodeURIComponent(process.env.POSTGRES_USER || 'ingestor');
+  const pass = encodeURIComponent(process.env.POSTGRES_PASSWORD || '');
+  return `postgres://${user}:${pass}@${host}:${port}/${db}`;
+}
+
 let cached: AppConfig | null = null;
 
 export function loadConfig(): AppConfig {

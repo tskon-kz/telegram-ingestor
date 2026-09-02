@@ -98,7 +98,9 @@ Both `/v1/*` (API) and `/login/*` (account login) are served by the `app` contai
    account. You enter phone, code, and 2FA there — **not** in the chat, because
    Telegram invalidates login codes sent inside Telegram messages.
 3. `/add @channel` or `/add https://t.me/+inviteHash` — track a channel
-   (optionally `/add @channel | My Topic`).
+   (optionally `/add @channel | My Topic`). Public channels are read **without
+   joining** (they won't appear in your chat list); private channels are joined
+   via the invite (required to read them), so they will appear in your account.
 4. `/topics`, `/newtopic`, `/addtotopic` — organize channels into topics.
 5. `/channels`, `/status` — see sync state.
 6. `/token` — create an API token (shown once). `/apiinfo` — access details.

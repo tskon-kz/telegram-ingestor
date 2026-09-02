@@ -88,7 +88,7 @@ export async function deleteSource(userId: string, id: string): Promise<boolean>
 export async function getSyncableSources(userId: string): Promise<Source[]> {
   const res = await query(
     `SELECT * FROM sources
-     WHERE user_id = $1 AND join_status = 'joined'
+     WHERE user_id = $1 AND join_status IN ('joined', 'accessible')
      ORDER BY added_at ASC`,
     [userId],
   );
