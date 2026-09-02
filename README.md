@@ -184,6 +184,43 @@ Integration tests use [testcontainers](https://testcontainers.com) and require a
 running Docker daemon. On OrbStack/Colima the socket is auto-detected from the
 active `docker context`.
 
+## CI/CD (GitHub Actions)
+
+`.github/workflows/ci-cd.yml` runs on every push/PR to `main`:
+
+1. **CI** — `npm ci`, typecheck, lint, build, and the full test suite
+   (integration tests run against Docker on the runner).
+2. **Deploy** — only on push to `main`, after CI passes: connects to your server
+   over SSH, syncs the repo to `origin/main`, and runs
+   `docker compose up -d --build`. Migrations run automatically via the `migrate`
+   service before the app starts.
+
+### Required GitHub repository secrets
+
+Settings → Secrets and variables → Actions:
+
+| Secret | Description |
+|--------|-------------|
+| `SSH_HOST` | Server host/IP |
+| `SSH_PORT` | SSH port (your custom port) |
+| `SSH_USER` | SSH user |
+| `SSH_KEY` | Private SSH key (PEM) for that user |
+| `DEPLOY_PATH` | Absolute path of the repo checkout on the server |
+
+### One-time server preparation
+
+```bash
+# On the server, as SSH_USER:
+git clone <this-repo-url> "$DEPLOY_PATH"
+cd "$DEPLOY_PATH"
+cp .env.example .env      # then fill in real secrets (never committed)
+```
+
+Requirements on the server: Docker + Docker Compose, git, and read access to the
+repo (deploy key or token). The `.env` file lives only on the server and is never
+touched by the workflow. Add the deploy user's public key to `~/.ssh/authorized_keys`
+and put the matching private key in the `SSH_KEY` secret.
+
 ## Scaling
 
 The ingestor is shard-ready: run multiple `ingestor` replicas and they will
