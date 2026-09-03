@@ -38,7 +38,6 @@ export function formatSource(s: Source): string {
 // Persistent bottom keyboard shown with the main menu.
 export function mainMenuKeyboard(): Keyboard {
   return new Keyboard()
-    .text('📡 Channels')
     .text('🗂 Categories')
     .row()
     .text('👤 Account')
@@ -50,15 +49,14 @@ export function mainMenuKeyboard(): Keyboard {
 export function mainMenuText(): string {
   return (
     '🏠 <b>Main menu</b>\n\n' +
-    'Use the buttons below to manage your channels and categories.\n' +
-    '📡 Channels · 🗂 Categories · 👤 Account · ⚙️ More'
+    'Channels live inside categories — open a category to view, add or edit its channels.\n' +
+    '🗂 Categories · 👤 Account · ⚙️ More'
   );
 }
 
 // Inline mirror of the reply keyboard, for "Back to menu" navigation.
 export function menuInlineView(): View {
   const kb = new InlineKeyboard()
-    .text('📡 Channels', 'ch:list')
     .text('🗂 Categories', 'tp:list')
     .row()
     .text('👤 Account', 'acct:home')
@@ -70,51 +68,23 @@ function backTo(cb: string, label = '⬅️ Back'): InlineKeyboard {
   return new InlineKeyboard().text(label, cb);
 }
 
-export async function channelsView(userId: string): Promise<View> {
-  const sources = await listSources(userId);
-  const kb = new InlineKeyboard().text('➕ Add channel', 'ch:add').row();
-  for (const s of sources) {
-    kb.text(channelLabel(s), `ch:view:${shortId(s.id)}`).row();
-  }
-  const text =
-    sources.length === 0
-      ? '📡 <b>Channels</b>\n\nNo channels tracked yet. Tap ➕ to add one.'
-      : `📡 <b>Channels</b> (${sources.length})\n\nTap a channel to manage it.`;
-  return { text, reply_markup: kb };
-}
-
-export async function channelDetailView(userId: string, source: Source): Promise<View> {
+// Channel detail is always opened within a category; Back returns there.
+export async function channelDetailView(
+  source: Source,
+  topic: { id: string; name: string },
+): Promise<View> {
+  const sShort = shortId(source.id);
+  const tShort = shortId(topic.id);
+  const otherIds = (await getTopicIdsForSource(source.userId, source.id)).filter(
+    (id) => id !== topic.id,
+  );
+  const alsoIn =
+    otherIds.length > 0 ? `\n\nAlso in ${otherIds.length} other categor${otherIds.length === 1 ? 'y' : 'ies'}.` : '';
   const kb = new InlineKeyboard()
-    .text('🗂 Add to category', `ch:cats:${shortId(source.id)}`)
+    .text('🗑 Remove from category', `ch:rm:${sShort}:${tShort}`)
     .row()
-    .text('🗑 Remove', `ch:rm:${shortId(source.id)}`)
-    .row()
-    .text('⬅️ Back', 'ch:list');
-  return { text: formatSource(source), reply_markup: kb };
-}
-
-// Toggle which categories a channel belongs to, from the channel side.
-export async function channelCategoriesView(userId: string, source: Source): Promise<View> {
-  const [topics, memberIds] = await Promise.all([
-    listTopics(userId),
-    getTopicIdsForSource(userId, source.id),
-  ]);
-  const member = new Set(memberIds);
-  const kb = new InlineKeyboard();
-  if (topics.length === 0) {
-    kb.text('➕ New category', 'tp:new').row();
-  }
-  for (const t of topics) {
-    const mark = member.has(t.id) ? '✅' : '⬜';
-    kb.text(`${mark} ${t.name}`, `ch:link:${shortId(source.id)}:${shortId(t.id)}`).row();
-  }
-  kb.text('⬅️ Back', `ch:view:${shortId(source.id)}`);
-  const title = source.title ?? source.externalId;
-  const text =
-    topics.length === 0
-      ? `🗂 <b>${escapeHtml(title)}</b>\n\nNo categories yet. Create one first.`
-      : `🗂 <b>${escapeHtml(title)}</b>\n\nTap a category to add/remove this channel.`;
-  return { text, reply_markup: kb };
+    .text('⬅️ Back', `tp:view:${tShort}`);
+  return { text: formatSource(source) + alsoIn, reply_markup: kb };
 }
 
 export function confirmView(text: string, confirmCb: string, cancelCb: string): View {
@@ -143,18 +113,21 @@ export async function topicDetailView(
 ): Promise<View> {
   const sources = await getTopicSources(userId, topic.id);
   const short = shortId(topic.id);
-  const kb = new InlineKeyboard()
-    .text('🔗 Manage channels', `tp:manage:${short}`)
+  const kb = new InlineKeyboard().text('➕ Add channel here', `tp:addch:${short}`).row();
+  for (const s of sources) {
+    kb.text(channelLabel(s), `ch:view:${shortId(s.id)}:${short}`).row();
+  }
+  kb.text('🔗 Manage channels', `tp:manage:${short}`)
     .row()
     .text('✏️ Rename', `tp:rename:${short}`)
     .text('🗑 Delete', `tp:del:${short}`)
     .row()
     .text('⬅️ Back', 'tp:list');
-  const list =
+  const hint =
     sources.length === 0
-      ? 'No channels in this category yet.'
-      : sources.map((s) => `• ${escapeHtml(s.title ?? s.externalId)}`).join('\n');
-  const text = `🗂 <b>${escapeHtml(topic.name)}</b> (${sources.length})\n\n${list}`;
+      ? 'No channels here yet. Tap ➕ to add one.'
+      : 'Tap a channel to view or edit it.';
+  const text = `🗂 <b>${escapeHtml(topic.name)}</b> (${sources.length})\n\n${hint}`;
   return { text, reply_markup: kb };
 }
 

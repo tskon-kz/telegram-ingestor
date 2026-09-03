@@ -8,6 +8,7 @@ import { revokeSession, getSessionMeta } from '../storage/sessions.js';
 import { listSources } from '../storage/sources.js';
 import {
   addSourceToTopic,
+  getTopic,
   getTopicByName,
   getTopicIdsForSource,
   listTopics,
@@ -18,6 +19,7 @@ import type { User } from '../core/models/index.js';
 import {
   makeTopic,
   removeChannel,
+  removeChannelFromCategory,
   removeTopic,
   renameTopicTo,
   toggleChannelInTopic,
@@ -28,9 +30,7 @@ import { clearPending, getPending, setPending } from './ui/state.js';
 import type { View } from './ui/views.js';
 import {
   accountView,
-  channelCategoriesView,
   channelDetailView,
-  channelsView,
   confirmView,
   formatSource,
   mainMenuKeyboard,
@@ -51,7 +51,7 @@ const HELP = `All commands:
 /login – connect your Telegram account
 /logout – disconnect your account
 
-/add <@channel | invite-link> [ | category] – track a channel
+/add <@channel | invite-link> | <category> – track a channel in a category
 /remove <@username | id> – stop tracking a channel
 /channels – list tracked channels + sync status
 /status – sync status summary
@@ -156,25 +156,23 @@ export function createBot(): Bot {
 
   bot.command('add', async (ctx) => {
     const user = await currentUser(ctx);
-    const arg = commandArg(ctx);
-    if (!arg) return ctx.reply('Usage: /add <@channel | invite-link> [ | category]');
-    const [refPart, topicName] = splitPipe(arg);
-    if (!refPart) return ctx.reply('Usage: /add <@channel | invite-link> [ | category]');
-
-    let topicId: string | undefined;
-    let missingTopic = false;
-    if (topicName) {
-      const topic = await getTopicByName(user.id, topicName);
-      if (topic) topicId = topic.id;
-      else missingTopic = true;
+    const [refPart, topicName] = splitPipe(commandArg(ctx));
+    if (!refPart || !topicName) {
+      return ctx.reply(
+        'Usage: /add <@channel | invite-link> | <category>\n' +
+          'Channels must be added to a category.',
+      );
+    }
+    const topic = await getTopicByName(user.id, topicName);
+    if (!topic) {
+      return ctx.reply(`Category "${topicName}" not found. Create it first with /newtopic.`);
     }
 
     await ctx.reply('⏳ Resolving channel…');
-    const result = await trackChannel(user, refPart, topicId);
+    const result = await trackChannel(user, refPart, topic.id);
     if (!result.ok) return ctx.reply(result.error);
-    const { source, note } = result.value;
-    const extra = missingTopic ? ` (category "${topicName}" not found — create it first)` : note;
-    await ctx.reply(`✅ Tracking "${source.title ?? source.externalId}"${extra}.`);
+    const { source } = result.value;
+    await ctx.reply(`✅ Tracking "${source.title ?? source.externalId}" in "${topicName}".`);
   });
 
   bot.command('remove', async (ctx) => {
@@ -313,12 +311,6 @@ export function createBot(): Bot {
 
   // --- Reply-keyboard top-level navigation ---
 
-  bot.hears('📡 Channels', async (ctx) => {
-    const user = await currentUser(ctx);
-    clearPending(user.id);
-    await sendView(ctx, await channelsView(user.id));
-  });
-
   bot.hears('🗂 Categories', async (ctx) => {
     const user = await currentUser(ctx);
     clearPending(user.id);
@@ -379,13 +371,15 @@ export function createBot(): Bot {
       return sendView(ctx, await topicDetailView(user.id, { id: pending.topicId, name: result.value }));
     }
 
-    // add_channel
+    // add_channel — always scoped to a category
     await ctx.reply('⏳ Resolving channel…');
     const result = await trackChannel(user, input, pending.topicId);
     if (!result.ok) return ctx.reply(result.error);
     const { source, note } = result.value;
     await ctx.reply(`✅ Tracking "${source.title ?? source.externalId}"${note}.`);
-    return sendView(ctx, await channelsView(user.id));
+    const topic = pending.topicId ? await getTopic(user.id, pending.topicId) : null;
+    if (topic) return sendView(ctx, await topicDetailView(user.id, topic));
+    return sendView(ctx, await topicsView(user.id));
   });
 
   bot.catch((err) => log.error({ err: err.error }, 'bot handler error'));
@@ -412,47 +406,33 @@ async function handleCallback(
     case 'nav:menu':
       return editView(ctx, menuInlineView());
 
-    // --- Channels ---
-    case 'ch:list':
-      return editView(ctx, await channelsView(user.id));
-    case 'ch:add':
-      setPending(user.id, { kind: 'add_channel' });
-      await ctx.reply('Send me the channel @username or invite link — or /cancel.');
-      return;
+    // --- Channels (always within a category: ch:<op>:<s8>:<t8>) ---
     case 'ch:view': {
       const source = await findSourceByShortId(user.id, parts[2]!);
-      if (!source) return editView(ctx, await channelsView(user.id));
-      return editView(ctx, await channelDetailView(user.id, source));
-    }
-    case 'ch:cats': {
-      const source = await findSourceByShortId(user.id, parts[2]!);
-      if (!source) return editView(ctx, await channelsView(user.id));
-      return editView(ctx, await channelCategoriesView(user.id, source));
-    }
-    case 'ch:link': {
-      const source = await findSourceByShortId(user.id, parts[2]!);
       const topic = await findTopicByShortId(user.id, parts[3]!);
-      if (!source || !topic) return;
-      const linked = await isChannelInTopic(user.id, topic.id, source.id);
-      await toggleChannelInTopic(user.id, topic.id, source.id, linked);
-      return editView(ctx, await channelCategoriesView(user.id, source));
+      if (!source || !topic) return editView(ctx, await topicsView(user.id));
+      return editView(ctx, await channelDetailView(source, topic));
     }
     case 'ch:rm': {
       const source = await findSourceByShortId(user.id, parts[2]!);
-      if (!source) return editView(ctx, await channelsView(user.id));
+      const topic = await findTopicByShortId(user.id, parts[3]!);
+      if (!source || !topic) return editView(ctx, await topicsView(user.id));
       return editView(
         ctx,
         confirmView(
-          `🗑 Remove "${source.title ?? source.externalId}"?`,
-          `ch:rmyes:${parts[2]}`,
-          `ch:view:${parts[2]}`,
+          `🗑 Remove "${source.title ?? source.externalId}" from "${topic.name}"?\n` +
+            `If it isn't in any other category, it will stop being tracked.`,
+          `ch:rmyes:${parts[2]}:${parts[3]}`,
+          `ch:view:${parts[2]}:${parts[3]}`,
         ),
       );
     }
     case 'ch:rmyes': {
       const source = await findSourceByShortId(user.id, parts[2]!);
-      if (source) await removeChannel(user.id, source.id);
-      return editView(ctx, await channelsView(user.id));
+      const topic = await findTopicByShortId(user.id, parts[3]!);
+      if (source && topic) await removeChannelFromCategory(user.id, topic.id, source.id);
+      if (topic) return editView(ctx, await topicDetailView(user.id, topic));
+      return editView(ctx, await topicsView(user.id));
     }
 
     // --- Categories ---
@@ -466,6 +446,15 @@ async function handleCallback(
       const topic = await findTopicByShortId(user.id, parts[2]!);
       if (!topic) return editView(ctx, await topicsView(user.id));
       return editView(ctx, await topicDetailView(user.id, topic));
+    }
+    case 'tp:addch': {
+      const topic = await findTopicByShortId(user.id, parts[2]!);
+      if (!topic) return editView(ctx, await topicsView(user.id));
+      setPending(user.id, { kind: 'add_channel', topicId: topic.id });
+      await ctx.reply(
+        `Send me the channel @username or invite link to add to "${topic.name}" — or /cancel.`,
+      );
+      return;
     }
     case 'tp:manage': {
       const topic = await findTopicByShortId(user.id, parts[2]!);

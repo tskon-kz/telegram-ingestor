@@ -9,6 +9,7 @@ import {
   createTopic,
   deleteTopic,
   getTopicByName,
+  getTopicIdsForSource,
   removeSourceFromTopic,
   renameTopic,
 } from '../../storage/topics.js';
@@ -98,6 +99,22 @@ export async function removeTopic(userId: string, topicId: string): Promise<bool
   return deleteTopic(userId, topicId);
 }
 
+// Remove a channel from a category. Channels must live in at least one
+// category, so a channel left in none stops being tracked entirely.
+export async function removeChannelFromCategory(
+  userId: string,
+  topicId: string,
+  sourceId: string,
+): Promise<{ untracked: boolean }> {
+  await removeSourceFromTopic(userId, topicId, sourceId);
+  const remaining = await getTopicIdsForSource(userId, sourceId);
+  if (remaining.length === 0) {
+    await deleteSource(userId, sourceId);
+    return { untracked: true };
+  }
+  return { untracked: false };
+}
+
 // Link the channel to the topic if not linked, otherwise unlink it.
 export async function toggleChannelInTopic(
   userId: string,
@@ -106,7 +123,7 @@ export async function toggleChannelInTopic(
   linked: boolean,
 ): Promise<void> {
   if (linked) {
-    await removeSourceFromTopic(userId, topicId, sourceId);
+    await removeChannelFromCategory(userId, topicId, sourceId);
   } else {
     await addSourceToTopic(userId, topicId, sourceId);
   }
