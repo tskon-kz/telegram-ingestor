@@ -33,6 +33,7 @@ import {
   accountView,
   channelDetailView,
   confirmView,
+  feedLinkView,
   formatSource,
   mainMenuKeyboard,
   mainMenuText,
@@ -74,6 +75,7 @@ const HELP = `All commands:
 // Commands surfaced in Telegram's command menu; the rest live under ⚙️ More.
 const MENU_COMMANDS = [
   { command: 'menu', description: 'Open the main menu' },
+  { command: 'feed', description: 'Open your personal feed' },
   { command: 'login', description: 'Connect your Telegram account' },
   { command: 'cancel', description: 'Abort the current action' },
   { command: 'help', description: 'Show all commands' },
@@ -137,6 +139,12 @@ export function createBot(): Bot {
     const user = await currentUser(ctx);
     clearPending(user.id);
     await ctx.reply('Cancelled.', { reply_markup: mainMenuKeyboard() });
+  });
+
+  bot.command('feed', async (ctx) => {
+    const user = await currentUser(ctx);
+    clearPending(user.id);
+    await sendView(ctx, feedLinkView(feedUrl(user)));
   });
 
   bot.command('login', async (ctx) => {
@@ -318,6 +326,12 @@ export function createBot(): Bot {
     const user = await currentUser(ctx);
     clearPending(user.id);
     await sendView(ctx, await topicsView(user.id));
+  });
+
+  bot.hears('📰 Feed', async (ctx) => {
+    const user = await currentUser(ctx);
+    clearPending(user.id);
+    await sendView(ctx, feedLinkView(feedUrl(user)));
   });
 
   bot.hears('👤 Account', async (ctx) => {

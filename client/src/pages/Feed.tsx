@@ -20,6 +20,8 @@ export function Feed() {
   const [sources, setSources] = useState<Source[]>([]);
   const [topic, setTopic] = useState<string>(ALL);
   const [channel, setChannel] = useState<string>(ALL);
+  const [from, setFrom] = useState<string>('');
+  const [to, setTo] = useState<string>('');
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -27,6 +29,17 @@ export function Feed() {
   const [listError, setListError] = useState<string | null>(null);
 
   const sourceById = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
+
+  // Shared message filter; `to` is made inclusive of the whole selected day.
+  const filterParams = useMemo(
+    () => ({
+      topic: topic === ALL ? undefined : topic,
+      channel: channel === ALL ? undefined : channel,
+      from: from ? `${from}T00:00:00` : undefined,
+      to: to ? `${to}T23:59:59.999` : undefined,
+    }),
+    [topic, channel, from, to],
+  );
 
   // Exchange the one-time link token for a session cookie, then load metadata.
   useEffect(() => {
@@ -52,7 +65,7 @@ export function Feed() {
     })();
   }, []);
 
-  // Reload messages whenever the category or channel filter changes.
+  // Reload messages whenever any filter changes.
   useEffect(() => {
     if (!ready) return;
     let cancelled = false;
@@ -60,10 +73,7 @@ export function Feed() {
     setListError(null);
     setMessages([]);
     setCursor(null);
-    fetchMessages({
-      topic: topic === ALL ? undefined : topic,
-      channel: channel === ALL ? undefined : channel,
-    })
+    fetchMessages(filterParams)
       .then((page) => {
         if (cancelled) return;
         setMessages(page.data);
@@ -74,17 +84,13 @@ export function Feed() {
     return () => {
       cancelled = true;
     };
-  }, [ready, topic, channel]);
+  }, [ready, filterParams]);
 
   const loadMore = async () => {
     if (!cursor || loading) return;
     setLoading(true);
     try {
-      const page = await fetchMessages({
-        topic: topic === ALL ? undefined : topic,
-        channel: channel === ALL ? undefined : channel,
-        cursor,
-      });
+      const page = await fetchMessages({ ...filterParams, cursor });
       setMessages((prev) => [...prev, ...page.data]);
       setCursor(page.next_cursor);
     } catch (err) {
@@ -147,6 +153,23 @@ export function Feed() {
             ))}
           </select>
         </label>
+        <label>
+          From: <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          To: <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        {(from || to) && (
+          <button
+            className="clear-dates"
+            onClick={() => {
+              setFrom('');
+              setTo('');
+            }}
+          >
+            Clear dates
+          </button>
+        )}
       </div>
 
       {listError && <div className="notice error">{listError}</div>}

@@ -14,6 +14,8 @@ import {
 const messagesQuery = z.object({
   channel: z.string().uuid().optional(),
   topic: z.string().uuid().optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().positive().optional(),
 });
@@ -64,6 +66,8 @@ export async function registerPortalRoutes(app: FastifyInstance): Promise<void> 
       const page = await listMessages(req.userId!, {
         sourceId: q.channel,
         topicId: q.topic,
+        from: q.from,
+        to: q.to,
         cursor: q.cursor,
         limit: q.limit,
       });

@@ -39,6 +39,7 @@ export function formatSource(s: Source): string {
 export function mainMenuKeyboard(): Keyboard {
   return new Keyboard()
     .text('🗂 Categories')
+    .text('📰 Feed')
     .row()
     .text('👤 Account')
     .text('⚙️ More')
@@ -153,6 +154,17 @@ export async function manageChannelsView(
       ? `🔗 <b>${escapeHtml(topic.name)}</b>\n\nNo channels yet. Add channels first.`
       : `🔗 <b>${escapeHtml(topic.name)}</b>\n\nTap a channel to add/remove it from this category.`;
   return { text, reply_markup: kb };
+}
+
+// Message shown when opening the personal feed; needs a freshly-signed link.
+export function feedLinkView(feedUrl: string): View {
+  return {
+    text:
+      '📰 <b>Your feed</b>\n\n' +
+      'Open your parsed messages grouped by category, with an optional channel and date filter.\n\n' +
+      'This link is valid for 10 minutes.',
+    reply_markup: new InlineKeyboard().url('📰 Open feed', feedUrl),
+  };
 }
 
 // Account view needs the freshly-signed login URL from the caller.

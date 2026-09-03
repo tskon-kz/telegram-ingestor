@@ -66,12 +66,16 @@ export async function fetchSources(): Promise<Source[]> {
 export async function fetchMessages(params: {
   topic?: string;
   channel?: string;
+  from?: string;
+  to?: string;
   cursor?: string;
   limit?: number;
 }): Promise<Page<Message>> {
   const qs = new URLSearchParams();
   if (params.topic) qs.set('topic', params.topic);
   if (params.channel) qs.set('channel', params.channel);
+  if (params.from) qs.set('from', params.from);
+  if (params.to) qs.set('to', params.to);
   if (params.cursor) qs.set('cursor', params.cursor);
   if (params.limit) qs.set('limit', String(params.limit));
   return json<Page<Message>>(
