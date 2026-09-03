@@ -156,7 +156,11 @@ export async function manageChannelsView(
 }
 
 // Account view needs the freshly-signed login URL from the caller.
-export async function accountView(userId: string, loginUrl: string): Promise<View> {
+export async function accountView(
+  userId: string,
+  loginUrl: string,
+  feedUrl: string,
+): Promise<View> {
   const [session, sources] = await Promise.all([
     getSessionMeta(userId),
     listSources(userId),
@@ -168,6 +172,7 @@ export async function accountView(userId: string, loginUrl: string): Promise<Vie
     `Channels: ${sources.length}`;
   const kb = new InlineKeyboard()
     .url('🔐 Connect', loginUrl)
+    .url('📰 My feed', feedUrl)
     .row()
     .text('📊 Status', 'acct:status')
     .text('🔌 Disconnect', 'acct:logout')

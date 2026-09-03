@@ -15,6 +15,8 @@
     "start:ingestor": "node dist/entrypoints/ingestor.js",
     "dev:app": "tsx watch src/entrypoints/app.ts",
     "dev:ingestor": "tsx watch src/entrypoints/ingestor.ts",
+    "dev:client": "npm --prefix client run dev",
+    "build:client": "npm --prefix client run build",
     "cli": "tsx src/cli/index.ts",
     "migrate": "node-pg-migrate",
     "migrate:up": "node-pg-migrate up",
@@ -25,7 +27,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
     "@fastify/helmet": "^12.0.1",
+    "@fastify/static": "^8.3.0",
     "commander": "^12.1.0",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.0",

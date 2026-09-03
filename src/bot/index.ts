@@ -3,6 +3,7 @@ import type { Context } from 'grammy';
 import { loadConfig } from '../config/index.js';
 import { childLogger } from '../logging/index.js';
 import { signPayload } from '../crypto/index.js';
+import { portalUrl } from './portalSession.js';
 import { upsertUser } from '../storage/users.js';
 import { revokeSession, getSessionMeta } from '../storage/sessions.js';
 import { listSources } from '../storage/sources.js';
@@ -89,8 +90,10 @@ export function createBot(): Bot {
 
   const loginUrl = (user: User): string => {
     const token = signPayload(user.id, cfg.LOGIN_LINK_SECRET, LOGIN_TTL_MS);
-    return `${cfg.PUBLIC_BASE_URL}/login?t=${encodeURIComponent(token)}`;
+    return `${cfg.PUBLIC_BASE_URL}/app/login?t=${encodeURIComponent(token)}`;
   };
+
+  const feedUrl = (user: User): string => portalUrl(user.id);
 
   const apiInfoText = (user: User): string =>
     `Your data is available via the read-only API (scoped to your account).\n\n` +
@@ -320,7 +323,7 @@ export function createBot(): Bot {
   bot.hears('👤 Account', async (ctx) => {
     const user = await currentUser(ctx);
     clearPending(user.id);
-    await sendView(ctx, await accountView(user.id, loginUrl(user)));
+    await sendView(ctx, await accountView(user.id, loginUrl(user), feedUrl(user)));
   });
 
   bot.hears('⚙️ More', async (ctx) => {
@@ -334,7 +337,7 @@ export function createBot(): Bot {
     const user = await currentUser(ctx);
     const data = ctx.callbackQuery.data;
     try {
-      await handleCallback(ctx, user, data, { loginUrl, apiInfoText });
+      await handleCallback(ctx, user, data, { loginUrl, feedUrl, apiInfoText });
     } catch (err) {
       log.error({ err, data }, 'callback handler error');
       await ctx.answerCallbackQuery({ text: 'Something went wrong.', show_alert: false });
@@ -390,6 +393,7 @@ export function createBot(): Bot {
 
 interface CallbackDeps {
   loginUrl: (user: User) => string;
+  feedUrl: (user: User) => string;
   apiInfoText: (user: User) => string;
 }
 
@@ -492,12 +496,12 @@ async function handleCallback(
 
     // --- Account ---
     case 'acct:home':
-      return editView(ctx, await accountView(user.id, deps.loginUrl(user)));
+      return editView(ctx, await accountView(user.id, deps.loginUrl(user), deps.feedUrl(user)));
     case 'acct:status':
       return editView(ctx, await statusView(user.id));
     case 'acct:logout':
       await revokeSession(user.id);
-      return editView(ctx, await accountView(user.id, deps.loginUrl(user)));
+      return editView(ctx, await accountView(user.id, deps.loginUrl(user), deps.feedUrl(user)));
     case 'acct:api':
       return editView(ctx, {
         text: deps.apiInfoText(user),
