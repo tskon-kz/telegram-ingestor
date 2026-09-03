@@ -1,4 +1,4 @@
-import type { NormalizedMessage, Source } from '../models/index.js';
+import type { NormalizedMessage, Source, SourceType } from '../models/index.js';
 
 // Extension point: new sources live under `sources/<name>/` implementing this.
 export interface SourceConnector {
@@ -15,6 +15,7 @@ export interface SourceConnector {
 }
 
 export interface ResolvedSource {
+  sourceType: SourceType;
   externalId: string;
   title: string | null;
   username: string | null;

@@ -42,7 +42,7 @@ export async function trackChannel(
     const resolved = await withUserConnector(user.id, (c) => c.resolve(user.id, ref));
     source = await createSource({
       userId: user.id,
-      type: 'telegram_channel',
+      type: resolved.sourceType,
       externalId: resolved.externalId,
       title: resolved.title,
       username: resolved.username,

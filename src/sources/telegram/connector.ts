@@ -6,9 +6,19 @@ import { mapTelegramMessage } from './mapper.js';
 const FETCH_LIMIT = 200;
 
 interface ChannelMeta {
+  peerType: 'channel';
   channelId: string;
   accessHash: string;
 }
+
+interface UserMeta {
+  peerType: 'user';
+  userId: string;
+  accessHash: string;
+}
+
+// Legacy sources were stored before peerType existed; treat them as channels.
+type PeerMeta = ChannelMeta | UserMeta;
 
 // Bound to one user's authenticated MTProto client.
 export class TelegramConnector implements SourceConnector {
@@ -25,7 +35,9 @@ export class TelegramConnector implements SourceConnector {
     });
     return messages
       .filter((m): m is Api.Message => m instanceof Api.Message)
-      .map(mapTelegramMessage);
+      // In dialogs both sides post; skip our own outgoing replies.
+      .filter((m) => !m.out)
+      .map((m) => mapTelegramMessage(m, source.type));
   }
 
   async seedCursor(source: Source, since: Date): Promise<bigint | null> {
@@ -48,12 +60,17 @@ export class TelegramConnector implements SourceConnector {
 
   private async resolveUsername(username: string): Promise<ResolvedSource> {
     const entity = await this.client.getEntity(username);
-    if (!(entity instanceof Api.Channel)) {
-      throw new Error('reference is not a channel');
+    if (entity instanceof Api.Channel) {
+      // Public channel: read history without joining, so it doesn't clutter the
+      // account's chat list. access_hash from getEntity is enough for getMessages.
+      return this.toResolvedChannel(entity, false, 'accessible');
     }
-    // Public channel: read history without joining, so it doesn't clutter the
-    // account's chat list. access_hash from getEntity is enough for getMessages.
-    return this.toResolved(entity, false, 'accessible');
+    if (entity instanceof Api.User) {
+      // Bot or user DM (e.g. hh.ru notifications). We already have the dialog,
+      // so history is readable directly via the user peer.
+      return this.toResolvedUser(entity);
+    }
+    throw new Error('reference is not a channel or user');
   }
 
   private async resolveInvite(hash: string): Promise<ResolvedSource> {
@@ -74,19 +91,21 @@ export class TelegramConnector implements SourceConnector {
       }
     }
     if (!channel) throw new Error('could not resolve private invite');
-    return this.toResolved(channel, true, 'joined');
+    return this.toResolvedChannel(channel, true, 'joined');
   }
 
-  private toResolved(
+  private toResolvedChannel(
     channel: Api.Channel,
     isPrivate: boolean,
     joinStatus: 'joined' | 'accessible',
   ): ResolvedSource {
     const meta: ChannelMeta = {
+      peerType: 'channel',
       channelId: channel.id.toString(),
       accessHash: channel.accessHash?.toString() ?? '0',
     };
     return {
+      sourceType: 'telegram_channel',
       externalId: channel.id.toString(),
       title: channel.title ?? null,
       username: channel.username ?? null,
@@ -96,14 +115,42 @@ export class TelegramConnector implements SourceConnector {
     };
   }
 
-  private peer(source: Source): Api.InputPeerChannel {
-    const meta = source.telegramMeta as unknown as ChannelMeta;
-    if (!meta?.channelId) {
+  private toResolvedUser(user: Api.User): ResolvedSource {
+    const meta: UserMeta = {
+      peerType: 'user',
+      userId: user.id.toString(),
+      accessHash: user.accessHash?.toString() ?? '0',
+    };
+    const name = [user.firstName, user.lastName].filter(Boolean).join(' ') || null;
+    return {
+      sourceType: 'telegram_dialog',
+      externalId: user.id.toString(),
+      title: name,
+      username: user.username ?? null,
+      isPrivate: true,
+      joinStatus: 'accessible',
+      telegramMeta: meta as unknown as Record<string, unknown>,
+    };
+  }
+
+  private peer(source: Source): Api.TypeInputPeer {
+    const meta = source.telegramMeta as unknown as PeerMeta;
+    if (meta?.peerType === 'user') {
+      if (!meta.userId) {
+        throw new Error(`source ${source.id} missing telegram peer metadata`);
+      }
+      return new Api.InputPeerUser({
+        userId: BigInt(meta.userId) as any,
+        accessHash: BigInt(meta.accessHash ?? '0') as any,
+      });
+    }
+    const channelMeta = meta as unknown as ChannelMeta;
+    if (!channelMeta?.channelId) {
       throw new Error(`source ${source.id} missing telegram peer metadata`);
     }
     return new Api.InputPeerChannel({
-      channelId: BigInt(meta.channelId) as any,
-      accessHash: BigInt(meta.accessHash ?? '0') as any,
+      channelId: BigInt(channelMeta.channelId) as any,
+      accessHash: BigInt(channelMeta.accessHash ?? '0') as any,
     });
   }
 }

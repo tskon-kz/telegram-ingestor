@@ -1,5 +1,5 @@
 import type { Api } from 'teleproto';
-import type { NormalizedMessage } from '../../core/models/index.js';
+import type { NormalizedMessage, SourceType } from '../../core/models/index.js';
 import { sha256Hex } from '../../crypto/index.js';
 
 // JSON-safe: converts bigint and Buffer so the raw payload can be stored as JSONB.
@@ -33,7 +33,7 @@ function extractLinks(msg: Api.Message): string[] {
   return [...links];
 }
 
-export function mapTelegramMessage(msg: Api.Message): NormalizedMessage {
+export function mapTelegramMessage(msg: Api.Message, sourceType: SourceType): NormalizedMessage {
   const text = msg.message ?? null;
   const media = msg.media as any;
   const metadata: Record<string, unknown> = {
@@ -49,7 +49,7 @@ export function mapTelegramMessage(msg: Api.Message): NormalizedMessage {
   };
 
   return {
-    sourceType: 'telegram_channel',
+    sourceType,
     externalMessageId: BigInt(msg.id),
     publishedAt: new Date(msg.date * 1000),
     text,

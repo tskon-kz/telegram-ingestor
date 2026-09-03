@@ -17,7 +17,8 @@ export interface UserQuotas {
   maxTopics: number;
 }
 
-export type SourceType = 'telegram_channel';
+// telegram_dialog = a one-on-one dialog (e.g. a bot's DMs like hh.ru notifications).
+export type SourceType = 'telegram_channel' | 'telegram_dialog';
 // 'accessible' = public channel we read without joining (not subscribed).
 export type JoinStatus = 'pending' | 'joined' | 'accessible' | 'failed' | 'left';
 export type SyncStatus = 'idle' | 'syncing' | 'error' | 'paused';

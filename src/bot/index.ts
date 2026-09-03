@@ -53,7 +53,7 @@ const HELP = `All commands:
 /login – connect your Telegram account
 /logout – disconnect your account
 
-/add <@channel | invite-link> | <category> – track a channel in a category
+/add <@channel | invite-link | @bot> | <category> – track a channel or bot/dialog in a category
 /remove <@username | id> – stop tracking a channel
 /channels – list tracked channels + sync status
 /status – sync status summary
@@ -170,8 +170,8 @@ export function createBot(): Bot {
     const [refPart, topicName] = splitPipe(commandArg(ctx));
     if (!refPart || !topicName) {
       return ctx.reply(
-        'Usage: /add <@channel | invite-link> | <category>\n' +
-          'Channels must be added to a category.',
+        'Usage: /add <@channel | invite-link | @bot> | <category>\n' +
+          'You can also add a bot/dialog (e.g. hh.ru notifications). Must be added to a category.',
       );
     }
     const topic = await getTopicByName(user.id, topicName);
@@ -470,7 +470,7 @@ async function handleCallback(
       if (!topic) return editView(ctx, await topicsView(user.id));
       setPending(user.id, { kind: 'add_channel', topicId: topic.id });
       await ctx.reply(
-        `Send me the channel @username or invite link to add to "${topic.name}" — or /cancel.`,
+        `Send me a channel @username, invite link, or a bot's @username (e.g. hh.ru notifications) to add to "${topic.name}" — or /cancel.`,
       );
       return;
     }
