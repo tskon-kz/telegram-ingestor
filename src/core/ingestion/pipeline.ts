@@ -17,21 +17,29 @@ export interface IngestResult {
 }
 
 // Idempotent: re-running from the same cursor is safe because inserts are conflict-skipped.
+// Messages older than `cutoff` are skipped (outside the retention/partition window)
+// but still advance the cursor, so backfill fast-forwards past ancient history.
 export async function ingestSource(
   connector: SourceConnector,
   source: Source,
   sink: IngestionSink,
+  cutoff: Date,
 ): Promise<IngestResult> {
   const messages = await connector.fetchSince(source, source.cursorMessageId);
   if (messages.length === 0) {
     return { fetched: 0, inserted: 0, newCursor: null };
   }
 
-  const { inserted } = await sink.insertMessages(
-    { userId: source.userId, sourceId: source.id },
-    messages,
-  );
+  const fresh = messages.filter((m) => m.publishedAt >= cutoff);
+  let inserted = 0;
+  if (fresh.length > 0) {
+    ({ inserted } = await sink.insertMessages(
+      { userId: source.userId, sourceId: source.id },
+      fresh,
+    ));
+  }
 
+  // Advance past the whole batch (incl. skipped-old rows) to make progress.
   const newCursor = messages.reduce<bigint>(
     (max, m) => (m.externalMessageId > max ? m.externalMessageId : max),
     source.cursorMessageId ?? 0n,

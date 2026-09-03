@@ -6,10 +6,14 @@ const log = childLogger({ mod: 'maintenance' });
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function ensurePartitions(): Promise<void> {
+  // Cover the whole retention window (+1 month slack) back and 2 months forward,
+  // so the backfill cutoff always lands inside an existing partition.
+  const monthsBack = Math.ceil(loadConfig().RETENTION_DAYS / 30) + 1;
   await query(
     `SELECT ensure_messages_partition(
        (date_trunc('month', now()) + (g || ' month')::interval)::date)
-     FROM generate_series(-4, 2) AS g`,
+     FROM generate_series($1, 2) AS g`,
+    [-monthsBack],
   );
 }
 

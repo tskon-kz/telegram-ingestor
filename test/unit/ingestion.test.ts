@@ -3,11 +3,13 @@ import { ingestSource, type IngestionSink } from '../../src/core/ingestion/pipel
 import type { NormalizedMessage, Source } from '../../src/core/models/index.js';
 import type { ResolvedSource, SourceConnector } from '../../src/core/ports/index.js';
 
-function msg(id: number): NormalizedMessage {
+const CUTOFF = new Date('2020-01-01T00:00:00Z');
+
+function msg(id: number, publishedAt = new Date('2026-01-01T00:00:00Z')): NormalizedMessage {
   return {
     sourceType: 'telegram_channel',
     externalMessageId: BigInt(id),
-    publishedAt: new Date('2026-01-01T00:00:00Z'),
+    publishedAt,
     text: `m${id}`,
     links: [],
     metadata: {},
@@ -41,6 +43,9 @@ class FakeConnector implements SourceConnector {
     const c = cursor ?? 0n;
     return this.messages.filter((m) => m.externalMessageId > c);
   }
+  async seedCursor(): Promise<bigint | null> {
+    return null;
+  }
   async resolve(): Promise<ResolvedSource> {
     throw new Error('not used');
   }
@@ -69,7 +74,7 @@ describe('ingestSource', () => {
   it('inserts messages and advances the cursor', async () => {
     const connector = new FakeConnector([msg(1), msg(2), msg(3)]);
     const store = new Set<string>();
-    const res = await ingestSource(connector, source, fakeSink(store));
+    const res = await ingestSource(connector, source, fakeSink(store), CUTOFF);
     expect(res.fetched).toBe(3);
     expect(res.inserted).toBe(3);
     expect(res.newCursor).toBe(3n);
@@ -78,10 +83,28 @@ describe('ingestSource', () => {
   it('is idempotent on re-run past the cursor', async () => {
     const connector = new FakeConnector([msg(1), msg(2)]);
     const store = new Set<string>();
-    await ingestSource(connector, source, fakeSink(store));
+    await ingestSource(connector, source, fakeSink(store), CUTOFF);
     // Re-run with an already-advanced cursor: nothing new fetched.
-    const res = await ingestSource(connector, { ...source, cursorMessageId: 2n }, fakeSink(store));
+    const res = await ingestSource(
+      connector,
+      { ...source, cursorMessageId: 2n },
+      fakeSink(store),
+      CUTOFF,
+    );
     expect(res.fetched).toBe(0);
     expect(res.inserted).toBe(0);
+  });
+
+  it('skips pre-cutoff messages but still advances the cursor past them', async () => {
+    const old = new Date('2019-06-01T00:00:00Z'); // before CUTOFF
+    const recent = new Date('2026-01-01T00:00:00Z'); // after CUTOFF
+    const connector = new FakeConnector([msg(1, old), msg(2, old), msg(3, recent)]);
+    const store = new Set<string>();
+    const res = await ingestSource(connector, source, fakeSink(store), CUTOFF);
+    expect(res.fetched).toBe(3);
+    expect(res.inserted).toBe(1); // only msg(3)
+    expect(res.newCursor).toBe(3n); // cursor advances past the skipped old rows
+    expect(store.has('3')).toBe(true);
+    expect(store.has('1')).toBe(false);
   });
 });

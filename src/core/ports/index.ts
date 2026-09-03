@@ -7,6 +7,10 @@ export interface SourceConnector {
   // Cursor is exclusive; returns messages ascending.
   fetchSince(source: Source, cursorMessageId: bigint | null): Promise<NormalizedMessage[]>;
 
+  // Exclusive cursor to start a fresh source near `since`; null if no message is
+  // that old (channel younger than the window). Used to bound backfill.
+  seedCursor(source: Source, since: Date): Promise<bigint | null>;
+
   resolve(userId: string, ref: string): Promise<ResolvedSource>;
 }
 

@@ -23,6 +23,7 @@ const LEASE_SECONDS = 60;
 const MAX_USERS_PER_WORKER = 200;
 const BASE_BACKOFF_MS = 30_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const sink = { insertMessages, updateCursor };
 
@@ -94,12 +95,22 @@ export class Ingestor {
       throw err; // transient (e.g. Telegram down) -> retry next tick
     }
 
+    const cutoff = new Date(Date.now() - loadConfig().RETENTION_DAYS * DAY_MS);
     const sources = await getSyncableSources(userId);
     for (const source of sources) {
       if (source.backoffUntil && source.backoffUntil.getTime() > Date.now()) continue;
       try {
         await markSyncStatus(source.id, 'syncing');
-        const result = await ingestSource(connector, source, sink);
+        // Fresh source: start near the retention cutoff so backfill stays inside
+        // the partition window instead of crawling from the channel's origin.
+        if (source.cursorMessageId == null) {
+          const seed = await connector.seedCursor(source, cutoff);
+          if (seed != null) {
+            await updateCursor(source.id, seed);
+            source.cursorMessageId = seed;
+          }
+        }
+        const result = await ingestSource(connector, source, sink, cutoff);
         if (result.inserted > 0) {
           log.info(
             { userId, sourceId: source.id, fetched: result.fetched, inserted: result.inserted },

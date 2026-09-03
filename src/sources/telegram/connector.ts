@@ -28,6 +28,18 @@ export class TelegramConnector implements SourceConnector {
       .map(mapTelegramMessage);
   }
 
+  async seedCursor(source: Source, since: Date): Promise<bigint | null> {
+    const peer = this.peer(source);
+    // offsetDate returns messages at/older than the date (descending); the first
+    // one is the newest message before the window. Use it as an exclusive cursor.
+    const messages = await this.client.getMessages(peer, {
+      offsetDate: Math.floor(since.getTime() / 1000),
+      limit: 1,
+    });
+    const first = messages.find((m): m is Api.Message => m instanceof Api.Message);
+    return first ? BigInt(first.id) : null;
+  }
+
   async resolve(_userId: string, ref: string): Promise<ResolvedSource> {
     const invite = parseInviteHash(ref);
     if (invite) return this.resolveInvite(invite);
