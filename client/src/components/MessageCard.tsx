@@ -1,13 +1,25 @@
 import type { Message, Source } from '../api';
 
 export function MessageCard({ message, source }: { message: Message; source?: Source }) {
-  const name = source
-    ? source.title ?? (source.username ? `@${source.username}` : source.external_id)
-    : 'Unknown channel';
+  const handle = source?.username ? `@${source.username}` : null;
+  const title = source?.title ?? null;
   return (
     <article className="card">
       <div className="card-head">
-        <span className="channel">{name}</span>
+        <span className="channel">
+          {handle && (
+            <a
+              className="handle"
+              href={`https://t.me/${source!.username}`}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              {handle}
+            </a>
+          )}
+          {title && <span className="title">{title}</span>}
+          {!handle && !title && <span className="title">{source?.external_id ?? 'Unknown channel'}</span>}
+        </span>
         <time>{formatDate(message.published_at)}</time>
       </div>
       {message.text && <p className="text">{message.text}</p>}

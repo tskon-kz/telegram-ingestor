@@ -180,9 +180,26 @@ body {
   margin-bottom: 8px;
 }
 .channel {
-  font-weight: 600;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
   font-size: 14px;
+  min-width: 0;
+}
+.channel .handle {
+  font-weight: 600;
   color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+.channel .handle:hover {
+  text-decoration: underline;
+}
+.channel .title {
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
 }
 .card time {
   color: var(--muted);

@@ -21,9 +21,16 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Identifying name with the real @username first, so it's easy to recognize
+// which channel was added. Falls back to title/externalId for private channels.
+export function channelName(s: Source): string {
+  const handle = s.username ? `@${s.username}` : null;
+  if (handle && s.title) return `${handle} · ${s.title}`;
+  return handle ?? s.title ?? s.externalId;
+}
+
 export function channelLabel(s: Source): string {
-  const name = s.title ?? (s.username ? `@${s.username}` : s.externalId);
-  return `${SYNC_EMOJI[s.syncStatus] ?? '•'} ${name}`;
+  return `${SYNC_EMOJI[s.syncStatus] ?? '•'} ${channelName(s)}`;
 }
 
 export function formatSource(s: Source): string {
@@ -145,8 +152,7 @@ export async function manageChannelsView(
   const kb = new InlineKeyboard();
   for (const s of all) {
     const mark = member.has(s.id) ? '✅' : '⬜';
-    const name = s.title ?? (s.username ? `@${s.username}` : s.externalId);
-    kb.text(`${mark} ${name}`, `tp:tog:${tShort}:${shortId(s.id)}`).row();
+    kb.text(`${mark} ${channelName(s)}`, `tp:tog:${tShort}:${shortId(s.id)}`).row();
   }
   kb.text('⬅️ Back', `tp:view:${tShort}`);
   const text =
