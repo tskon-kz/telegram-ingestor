@@ -5,7 +5,6 @@ import { Login } from './pages/Login';
 import './styles.css';
 
 function App() {
-  // Minimal routing: /app/login -> login form, everything else -> feed.
   const page = window.location.pathname.replace(/\/+$/, '').endsWith('/login') ? 'login' : 'feed';
   return page === 'login' ? <Login /> : <Feed />;
 }
