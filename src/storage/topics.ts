@@ -82,6 +82,16 @@ export async function removeSourceFromTopic(
   return (res.rowCount ?? 0) > 0;
 }
 
+export async function getTopicIdsForSource(userId: string, sourceId: string): Promise<string[]> {
+  const res = await query(
+    `SELECT ts.topic_id FROM topic_sources ts
+     JOIN topics t ON t.id = ts.topic_id
+     WHERE ts.source_id = $1 AND t.user_id = $2`,
+    [sourceId, userId],
+  );
+  return res.rows.map((r) => r.topic_id as string);
+}
+
 export async function getTopicSources(userId: string, topicId: string): Promise<Source[]> {
   const res = await query(
     `SELECT s.* FROM sources s

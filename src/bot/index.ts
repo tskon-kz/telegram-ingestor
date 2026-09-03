@@ -3,55 +3,82 @@ import type { Context } from 'grammy';
 import { loadConfig } from '../config/index.js';
 import { childLogger } from '../logging/index.js';
 import { signPayload } from '../crypto/index.js';
-import { getQuotas, upsertUser } from '../storage/users.js';
+import { upsertUser } from '../storage/users.js';
 import { revokeSession, getSessionMeta } from '../storage/sessions.js';
-import {
-  countSources,
-  createSource,
-  deleteSource,
-  listSources,
-} from '../storage/sources.js';
+import { listSources } from '../storage/sources.js';
 import {
   addSourceToTopic,
-  countTopics,
-  createTopic,
-  deleteTopic,
   getTopicByName,
+  getTopicIdsForSource,
   listTopics,
   removeSourceFromTopic,
-  renameTopic,
 } from '../storage/topics.js';
 import { createApiToken, listApiTokens, revokeApiToken } from '../storage/tokens.js';
-import { NotLoggedInError, withUserConnector } from '../sources/telegram/userSession.js';
-import type { Source } from '../core/models/index.js';
+import type { User } from '../core/models/index.js';
+import {
+  makeTopic,
+  removeChannel,
+  removeTopic,
+  renameTopicTo,
+  toggleChannelInTopic,
+  trackChannel,
+} from './ui/actions.js';
+import { findSourceByShortId, findTopicByShortId } from './ui/ids.js';
+import { clearPending, getPending, setPending } from './ui/state.js';
+import type { View } from './ui/views.js';
+import {
+  accountView,
+  channelCategoriesView,
+  channelDetailView,
+  channelsView,
+  confirmView,
+  formatSource,
+  mainMenuKeyboard,
+  mainMenuText,
+  manageChannelsView,
+  menuInlineView,
+  statusView,
+  topicDetailView,
+  topicsView,
+} from './ui/views.js';
 
 const log = childLogger({ mod: 'bot' });
 const LOGIN_TTL_MS = 10 * 60 * 1000;
 
-const HELP = `Available commands:
+const HELP = `All commands:
 
+/menu – open the main menu
 /login – connect your Telegram account
 /logout – disconnect your account
 
-/add <@channel | invite-link> [ | topic] – track a channel
+/add <@channel | invite-link> [ | category] – track a channel
 /remove <@username | id> – stop tracking a channel
 /channels – list tracked channels + sync status
 /status – sync status summary
 
-/topics – list your topics
-/newtopic <name> – create a topic
+/topics – list your categories
+/newtopic <name> – create a category
 /renametopic <name> | <new name>
 /deltopic <name>
-/addtotopic <channel> | <topic>
-/removefromtopic <channel> | <topic>
+/addtotopic <channel> | <category>
+/removefromtopic <channel> | <category>
 
 /token [name] – create an API token (shown once)
 /tokens – list your API tokens
 /revoketoken <id> – revoke a token
 /apiinfo – how to access your data via the API/CLI
-/whoami – your account info`;
+/whoami – your account info
+/cancel – abort the current action`;
 
-async function currentUser(ctx: Context) {
+// Commands surfaced in Telegram's command menu; the rest live under ⚙️ More.
+const MENU_COMMANDS = [
+  { command: 'menu', description: 'Open the main menu' },
+  { command: 'login', description: 'Connect your Telegram account' },
+  { command: 'cancel', description: 'Abort the current action' },
+  { command: 'help', description: 'Show all commands' },
+];
+
+async function currentUser(ctx: Context): Promise<User> {
   const from = ctx.from!;
   return upsertUser(BigInt(from.id), from.username ?? null);
 }
@@ -59,6 +86,20 @@ async function currentUser(ctx: Context) {
 export function createBot(): Bot {
   const cfg = loadConfig();
   const bot = new Bot(cfg.BOT_TOKEN);
+
+  const loginUrl = (user: User): string => {
+    const token = signPayload(user.id, cfg.LOGIN_LINK_SECRET, LOGIN_TTL_MS);
+    return `${cfg.PUBLIC_BASE_URL}/login?t=${encodeURIComponent(token)}`;
+  };
+
+  const apiInfoText = (user: User): string =>
+    `Your data is available via the read-only API (scoped to your account).\n\n` +
+    `Base URL: ${cfg.PUBLIC_BASE_URL}\nUser ID: ${user.id}\n\n` +
+    `1. Create a token: /token\n` +
+    `2. Example:\n` +
+    `curl -H "Authorization: Bearer <token>" "${cfg.PUBLIC_BASE_URL}/v1/messages?limit=50"\n\n` +
+    `Endpoints: /v1/sources, /v1/topics, /v1/messages, /v1/messages/:id\n` +
+    `CLI: INGEST_API_URL=${cfg.PUBLIC_BASE_URL} INGEST_TOKEN=<token> ingest-cli messages`;
 
   bot.use(async (ctx, next) => {
     if (!ctx.from) return;
@@ -69,21 +110,39 @@ export function createBot(): Bot {
     await next();
   });
 
+  // --- Core menu commands ---
+
   bot.command('start', async (ctx) => {
     await currentUser(ctx);
-    await ctx.reply(`Welcome! This bot collects messages from your Telegram channels.\n\n${HELP}`);
+    await ctx.reply(
+      'Welcome! This bot collects messages from your Telegram channels.\n\n' + mainMenuText(),
+      { parse_mode: 'HTML', reply_markup: mainMenuKeyboard() },
+    );
   });
+
+  bot.command('menu', async (ctx) => {
+    await currentUser(ctx);
+    await ctx.reply(mainMenuText(), {
+      parse_mode: 'HTML',
+      reply_markup: mainMenuKeyboard(),
+    });
+  });
+
   bot.command('help', async (ctx) => ctx.reply(HELP));
+
+  bot.command('cancel', async (ctx) => {
+    const user = await currentUser(ctx);
+    clearPending(user.id);
+    await ctx.reply('Cancelled.', { reply_markup: mainMenuKeyboard() });
+  });
 
   bot.command('login', async (ctx) => {
     const user = await currentUser(ctx);
-    const token = signPayload(user.id, cfg.LOGIN_LINK_SECRET, LOGIN_TTL_MS);
-    const url = `${cfg.PUBLIC_BASE_URL}/login?t=${encodeURIComponent(token)}`;
     await ctx.reply(
       'Open the secure login page to connect your Telegram account. ' +
         'Enter the code there (not here) — Telegram invalidates codes sent in chats.\n\n' +
         'This link is valid for 10 minutes.',
-      { reply_markup: new InlineKeyboard().url('🔐 Open login page', url) },
+      { reply_markup: new InlineKeyboard().url('🔐 Open login page', loginUrl(user)) },
     );
   });
 
@@ -93,47 +152,29 @@ export function createBot(): Bot {
     await ctx.reply('Disconnected. Your session was removed.');
   });
 
+  // --- Channel commands (kept for power users; UI mirrors these) ---
+
   bot.command('add', async (ctx) => {
     const user = await currentUser(ctx);
     const arg = commandArg(ctx);
-    if (!arg) return ctx.reply('Usage: /add <@channel | invite-link> [ | topic]');
+    if (!arg) return ctx.reply('Usage: /add <@channel | invite-link> [ | category]');
     const [refPart, topicName] = splitPipe(arg);
-    if (!refPart) return ctx.reply('Usage: /add <@channel | invite-link> [ | topic]');
+    if (!refPart) return ctx.reply('Usage: /add <@channel | invite-link> [ | category]');
 
-    const quotas = await getQuotas(user.id);
-    if ((await countSources(user.id)) >= quotas.maxChannels) {
-      return ctx.reply(`Channel limit reached (${quotas.maxChannels}).`);
-    }
-
-    await ctx.reply('Resolving channel…');
-    let source: Source;
-    try {
-      const resolved = await withUserConnector(user.id, (c) => c.resolve(user.id, refPart));
-      source = await createSource({
-        userId: user.id,
-        type: 'telegram_channel',
-        externalId: resolved.externalId,
-        title: resolved.title,
-        username: resolved.username,
-        isPrivate: resolved.isPrivate,
-        joinStatus: resolved.joinStatus,
-        telegramMeta: resolved.telegramMeta,
-      });
-    } catch (err) {
-      return ctx.reply(loginAwareError(err, 'Could not add channel'));
-    }
-
-    let note = '';
+    let topicId: string | undefined;
+    let missingTopic = false;
     if (topicName) {
       const topic = await getTopicByName(user.id, topicName);
-      if (topic) {
-        await addSourceToTopic(user.id, topic.id, source.id);
-        note = ` (added to topic "${topicName}")`;
-      } else {
-        note = ` (topic "${topicName}" not found — create it with /newtopic)`;
-      }
+      if (topic) topicId = topic.id;
+      else missingTopic = true;
     }
-    await ctx.reply(`✅ Tracking "${source.title ?? source.externalId}"${note}.`);
+
+    await ctx.reply('⏳ Resolving channel…');
+    const result = await trackChannel(user, refPart, topicId);
+    if (!result.ok) return ctx.reply(result.error);
+    const { source, note } = result.value;
+    const extra = missingTopic ? ` (category "${topicName}" not found — create it first)` : note;
+    await ctx.reply(`✅ Tracking "${source.title ?? source.externalId}"${extra}.`);
   });
 
   bot.command('remove', async (ctx) => {
@@ -142,7 +183,7 @@ export function createBot(): Bot {
     if (!arg) return ctx.reply('Usage: /remove <@username | id>');
     const source = await findSourceByRef(user.id, arg);
     if (!source) return ctx.reply('Channel not found. Use /channels to see the list.');
-    await deleteSource(user.id, source.id);
+    await removeChannel(user.id, source.id);
     await ctx.reply(`🗑️ Removed "${source.title ?? source.externalId}".`);
   });
 
@@ -155,21 +196,16 @@ export function createBot(): Bot {
 
   bot.command('status', async (ctx) => {
     const user = await currentUser(ctx);
-    const session = await getSessionMeta(user.id);
-    const sources = await listSources(user.id);
-    const lines = [
-      `Account: ${session ? session.status : 'not connected'}`,
-      `Channels: ${sources.length}`,
-      '',
-      ...sources.map((s) => `• ${s.title ?? s.externalId} — ${s.syncStatus}${s.lastError ? ` (${s.lastError})` : ''}`),
-    ];
-    await ctx.reply(lines.join('\n'));
+    const view = await statusView(user.id);
+    await ctx.reply(view.text, { parse_mode: 'HTML' });
   });
+
+  // --- Category (topic) commands ---
 
   bot.command('topics', async (ctx) => {
     const user = await currentUser(ctx);
     const topics = await listTopics(user.id);
-    if (topics.length === 0) return ctx.reply('No topics yet. Create one with /newtopic <name>.');
+    if (topics.length === 0) return ctx.reply('No categories yet. Create one with /newtopic <name>.');
     await ctx.reply(topics.map((t) => `• ${t.name} — ${t.sourceCount} channel(s)`).join('\n'));
   });
 
@@ -177,13 +213,9 @@ export function createBot(): Bot {
     const user = await currentUser(ctx);
     const name = commandArg(ctx);
     if (!name) return ctx.reply('Usage: /newtopic <name>');
-    const quotas = await getQuotas(user.id);
-    if ((await countTopics(user.id)) >= quotas.maxTopics) {
-      return ctx.reply(`Topic limit reached (${quotas.maxTopics}).`);
-    }
-    if (await getTopicByName(user.id, name)) return ctx.reply('A topic with that name already exists.');
-    await createTopic(user.id, name);
-    await ctx.reply(`✅ Created topic "${name}".`);
+    const result = await makeTopic(user, name);
+    if (!result.ok) return ctx.reply(result.error);
+    await ctx.reply(`✅ Created category "${result.value.name}".`);
   });
 
   bot.command('renametopic', async (ctx) => {
@@ -191,9 +223,10 @@ export function createBot(): Bot {
     const [oldName, newName] = splitPipe(commandArg(ctx));
     if (!oldName || !newName) return ctx.reply('Usage: /renametopic <name> | <new name>');
     const topic = await getTopicByName(user.id, oldName);
-    if (!topic) return ctx.reply('Topic not found.');
-    await renameTopic(user.id, topic.id, newName);
-    await ctx.reply(`✅ Renamed to "${newName}".`);
+    if (!topic) return ctx.reply('Category not found.');
+    const result = await renameTopicTo(user, topic.id, newName);
+    if (!result.ok) return ctx.reply(result.error);
+    await ctx.reply(`✅ Renamed to "${result.value}".`);
   });
 
   bot.command('deltopic', async (ctx) => {
@@ -201,19 +234,19 @@ export function createBot(): Bot {
     const name = commandArg(ctx);
     if (!name) return ctx.reply('Usage: /deltopic <name>');
     const topic = await getTopicByName(user.id, name);
-    if (!topic) return ctx.reply('Topic not found.');
-    await deleteTopic(user.id, topic.id);
-    await ctx.reply(`🗑️ Deleted topic "${name}".`);
+    if (!topic) return ctx.reply('Category not found.');
+    await removeTopic(user.id, topic.id);
+    await ctx.reply(`🗑️ Deleted category "${name}".`);
   });
 
   bot.command('addtotopic', async (ctx) => {
     const user = await currentUser(ctx);
     const [ref, topicName] = splitPipe(commandArg(ctx));
-    if (!ref || !topicName) return ctx.reply('Usage: /addtotopic <channel> | <topic>');
+    if (!ref || !topicName) return ctx.reply('Usage: /addtotopic <channel> | <category>');
     const source = await findSourceByRef(user.id, ref);
     const topic = await getTopicByName(user.id, topicName);
     if (!source) return ctx.reply('Channel not found.');
-    if (!topic) return ctx.reply('Topic not found.');
+    if (!topic) return ctx.reply('Category not found.');
     await addSourceToTopic(user.id, topic.id, source.id);
     await ctx.reply(`✅ Added "${source.title ?? source.externalId}" to "${topicName}".`);
   });
@@ -221,13 +254,15 @@ export function createBot(): Bot {
   bot.command('removefromtopic', async (ctx) => {
     const user = await currentUser(ctx);
     const [ref, topicName] = splitPipe(commandArg(ctx));
-    if (!ref || !topicName) return ctx.reply('Usage: /removefromtopic <channel> | <topic>');
+    if (!ref || !topicName) return ctx.reply('Usage: /removefromtopic <channel> | <category>');
     const source = await findSourceByRef(user.id, ref);
     const topic = await getTopicByName(user.id, topicName);
-    if (!source || !topic) return ctx.reply('Channel or topic not found.');
+    if (!source || !topic) return ctx.reply('Channel or category not found.');
     await removeSourceFromTopic(user.id, topic.id, source.id);
-    await ctx.reply('✅ Removed from topic.');
+    await ctx.reply('✅ Removed from category.');
   });
+
+  // --- API token commands ---
 
   bot.command('token', async (ctx) => {
     const user = await currentUser(ctx);
@@ -264,16 +299,7 @@ export function createBot(): Bot {
 
   bot.command('apiinfo', async (ctx) => {
     const user = await currentUser(ctx);
-    const base = cfg.PUBLIC_BASE_URL;
-    await ctx.reply(
-      `Your data is available via the read-only API (scoped to your account).\n\n` +
-        `Base URL: ${base}\nUser ID: ${user.id}\n\n` +
-        `1. Create a token: /token\n` +
-        `2. Example:\n` +
-        `curl -H "Authorization: Bearer <token>" "${base}/v1/messages?limit=50"\n\n` +
-        `Endpoints: /v1/sources, /v1/topics, /v1/messages, /v1/messages/:id\n` +
-        `CLI: INGEST_API_URL=${base} INGEST_TOKEN=<token> ingest-cli messages`,
-    );
+    await ctx.reply(apiInfoText(user));
   });
 
   bot.command('whoami', async (ctx) => {
@@ -285,8 +311,244 @@ export function createBot(): Bot {
     );
   });
 
+  // --- Reply-keyboard top-level navigation ---
+
+  bot.hears('📡 Channels', async (ctx) => {
+    const user = await currentUser(ctx);
+    clearPending(user.id);
+    await sendView(ctx, await channelsView(user.id));
+  });
+
+  bot.hears('🗂 Categories', async (ctx) => {
+    const user = await currentUser(ctx);
+    clearPending(user.id);
+    await sendView(ctx, await topicsView(user.id));
+  });
+
+  bot.hears('👤 Account', async (ctx) => {
+    const user = await currentUser(ctx);
+    clearPending(user.id);
+    await sendView(ctx, await accountView(user.id, loginUrl(user)));
+  });
+
+  bot.hears('⚙️ More', async (ctx) => {
+    await currentUser(ctx);
+    await ctx.reply(HELP);
+  });
+
+  // --- Inline button callbacks ---
+
+  bot.on('callback_query:data', async (ctx) => {
+    const user = await currentUser(ctx);
+    const data = ctx.callbackQuery.data;
+    try {
+      await handleCallback(ctx, user, data, { loginUrl, apiInfoText });
+    } catch (err) {
+      log.error({ err, data }, 'callback handler error');
+      await ctx.answerCallbackQuery({ text: 'Something went wrong.', show_alert: false });
+      return;
+    }
+    await ctx.answerCallbackQuery().catch(() => undefined);
+  });
+
+  // --- Pending free-text input (add channel, new/rename category) ---
+
+  bot.on('message:text', async (ctx) => {
+    const user = await currentUser(ctx);
+    const pending = getPending(user.id);
+    if (!pending) {
+      await ctx.reply('🤔 Use the menu buttons below, or /menu.', {
+        reply_markup: mainMenuKeyboard(),
+      });
+      return;
+    }
+    clearPending(user.id);
+    const input = ctx.message.text.trim();
+
+    if (pending.kind === 'new_topic') {
+      const result = await makeTopic(user, input);
+      if (!result.ok) return ctx.reply(result.error);
+      await ctx.reply(`✅ Created category "${result.value.name}".`);
+      return sendView(ctx, await topicsView(user.id));
+    }
+
+    if (pending.kind === 'rename_topic') {
+      const result = await renameTopicTo(user, pending.topicId, input);
+      if (!result.ok) return ctx.reply(result.error);
+      await ctx.reply(`✅ Renamed to "${result.value}".`);
+      return sendView(ctx, await topicDetailView(user.id, { id: pending.topicId, name: result.value }));
+    }
+
+    // add_channel
+    await ctx.reply('⏳ Resolving channel…');
+    const result = await trackChannel(user, input, pending.topicId);
+    if (!result.ok) return ctx.reply(result.error);
+    const { source, note } = result.value;
+    await ctx.reply(`✅ Tracking "${source.title ?? source.externalId}"${note}.`);
+    return sendView(ctx, await channelsView(user.id));
+  });
+
   bot.catch((err) => log.error({ err: err.error }, 'bot handler error'));
+
+  bot.api.setMyCommands(MENU_COMMANDS).catch((err) => log.error({ err }, 'setMyCommands failed'));
   return bot;
+}
+
+interface CallbackDeps {
+  loginUrl: (user: User) => string;
+  apiInfoText: (user: User) => string;
+}
+
+async function handleCallback(
+  ctx: Context,
+  user: User,
+  data: string,
+  deps: CallbackDeps,
+): Promise<void> {
+  const parts = data.split(':');
+  const route = `${parts[0]}:${parts[1] ?? ''}`;
+
+  switch (route) {
+    case 'nav:menu':
+      return editView(ctx, menuInlineView());
+
+    // --- Channels ---
+    case 'ch:list':
+      return editView(ctx, await channelsView(user.id));
+    case 'ch:add':
+      setPending(user.id, { kind: 'add_channel' });
+      await ctx.reply('Send me the channel @username or invite link — or /cancel.');
+      return;
+    case 'ch:view': {
+      const source = await findSourceByShortId(user.id, parts[2]!);
+      if (!source) return editView(ctx, await channelsView(user.id));
+      return editView(ctx, await channelDetailView(user.id, source));
+    }
+    case 'ch:cats': {
+      const source = await findSourceByShortId(user.id, parts[2]!);
+      if (!source) return editView(ctx, await channelsView(user.id));
+      return editView(ctx, await channelCategoriesView(user.id, source));
+    }
+    case 'ch:link': {
+      const source = await findSourceByShortId(user.id, parts[2]!);
+      const topic = await findTopicByShortId(user.id, parts[3]!);
+      if (!source || !topic) return;
+      const linked = await isChannelInTopic(user.id, topic.id, source.id);
+      await toggleChannelInTopic(user.id, topic.id, source.id, linked);
+      return editView(ctx, await channelCategoriesView(user.id, source));
+    }
+    case 'ch:rm': {
+      const source = await findSourceByShortId(user.id, parts[2]!);
+      if (!source) return editView(ctx, await channelsView(user.id));
+      return editView(
+        ctx,
+        confirmView(
+          `🗑 Remove "${source.title ?? source.externalId}"?`,
+          `ch:rmyes:${parts[2]}`,
+          `ch:view:${parts[2]}`,
+        ),
+      );
+    }
+    case 'ch:rmyes': {
+      const source = await findSourceByShortId(user.id, parts[2]!);
+      if (source) await removeChannel(user.id, source.id);
+      return editView(ctx, await channelsView(user.id));
+    }
+
+    // --- Categories ---
+    case 'tp:list':
+      return editView(ctx, await topicsView(user.id));
+    case 'tp:new':
+      setPending(user.id, { kind: 'new_topic' });
+      await ctx.reply('Send me a name for the new category — or /cancel.');
+      return;
+    case 'tp:view': {
+      const topic = await findTopicByShortId(user.id, parts[2]!);
+      if (!topic) return editView(ctx, await topicsView(user.id));
+      return editView(ctx, await topicDetailView(user.id, topic));
+    }
+    case 'tp:manage': {
+      const topic = await findTopicByShortId(user.id, parts[2]!);
+      if (!topic) return editView(ctx, await topicsView(user.id));
+      return editView(ctx, await manageChannelsView(user.id, topic));
+    }
+    case 'tp:tog': {
+      const topic = await findTopicByShortId(user.id, parts[2]!);
+      const source = await findSourceByShortId(user.id, parts[3]!);
+      if (!topic || !source) return;
+      const linked = await isChannelInTopic(user.id, topic.id, source.id);
+      await toggleChannelInTopic(user.id, topic.id, source.id, linked);
+      return editView(ctx, await manageChannelsView(user.id, topic));
+    }
+    case 'tp:rename': {
+      const topic = await findTopicByShortId(user.id, parts[2]!);
+      if (!topic) return editView(ctx, await topicsView(user.id));
+      setPending(user.id, { kind: 'rename_topic', topicId: topic.id });
+      await ctx.reply(`Send me a new name for "${topic.name}" — or /cancel.`);
+      return;
+    }
+    case 'tp:del': {
+      const topic = await findTopicByShortId(user.id, parts[2]!);
+      if (!topic) return editView(ctx, await topicsView(user.id));
+      return editView(
+        ctx,
+        confirmView(`🗑 Delete category "${topic.name}"?`, `tp:delyes:${parts[2]}`, `tp:view:${parts[2]}`),
+      );
+    }
+    case 'tp:delyes': {
+      const topic = await findTopicByShortId(user.id, parts[2]!);
+      if (topic) await removeTopic(user.id, topic.id);
+      return editView(ctx, await topicsView(user.id));
+    }
+
+    // --- Account ---
+    case 'acct:home':
+      return editView(ctx, await accountView(user.id, deps.loginUrl(user)));
+    case 'acct:status':
+      return editView(ctx, await statusView(user.id));
+    case 'acct:logout':
+      await revokeSession(user.id);
+      return editView(ctx, await accountView(user.id, deps.loginUrl(user)));
+    case 'acct:api':
+      return editView(ctx, {
+        text: deps.apiInfoText(user),
+        reply_markup: new InlineKeyboard().text('⬅️ Back', 'acct:home'),
+      });
+
+    // --- More ---
+    case 'more:home':
+      return editView(ctx, {
+        text: HELP,
+        reply_markup: new InlineKeyboard().text('⬅️ Back', 'nav:menu'),
+      });
+
+    default:
+      return;
+  }
+}
+
+// Whether a channel currently belongs to a topic.
+async function isChannelInTopic(userId: string, topicId: string, sourceId: string): Promise<boolean> {
+  const ids = await getTopicIdsForSource(userId, sourceId);
+  return ids.includes(topicId);
+}
+
+async function sendView(ctx: Context, view: View): Promise<void> {
+  await ctx.reply(view.text, { parse_mode: 'HTML', reply_markup: view.reply_markup });
+}
+
+async function editView(ctx: Context, view: View): Promise<void> {
+  try {
+    await ctx.editMessageText(view.text, {
+      parse_mode: 'HTML',
+      reply_markup: view.reply_markup,
+    });
+  } catch (err) {
+    // "message is not modified" and stale-message edits are harmless.
+    if (!/not modified|message to edit/i.test(String((err as any)?.description ?? err))) {
+      throw err;
+    }
+  }
 }
 
 function commandArg(ctx: Context): string {
@@ -300,7 +562,7 @@ function splitPipe(arg: string): [string, string | undefined] {
   return [parts[0] ?? '', parts[1] || undefined];
 }
 
-async function findSourceByRef(userId: string, ref: string): Promise<Source | null> {
+async function findSourceByRef(userId: string, ref: string) {
   const clean = ref.replace(/^@/, '').toLowerCase();
   const sources = await listSources(userId);
   return (
@@ -311,25 +573,4 @@ async function findSourceByRef(userId: string, ref: string): Promise<Source | nu
         (s.username ?? '').toLowerCase() === clean,
     ) ?? null
   );
-}
-
-function formatSource(s: Source): string {
-  const handle = s.username ? `@${s.username}` : s.externalId;
-  return (
-    `<b>${escapeHtml(s.title ?? handle)}</b> (${s.id.slice(0, 8)})\n` +
-    `${handle} · ${s.isPrivate ? 'private' : 'public'} · sync: ${s.syncStatus}` +
-    (s.lastError ? `\n⚠️ ${escapeHtml(s.lastError)}` : '')
-  );
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function loginAwareError(err: unknown, prefix: string): string {
-  if (err instanceof NotLoggedInError) {
-    return 'You need to connect your Telegram account first. Use /login.';
-  }
-  const msg = (err as any)?.errorMessage ?? (err as Error)?.message ?? String(err);
-  return `${prefix}: ${msg}`;
 }
