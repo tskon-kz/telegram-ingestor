@@ -102,9 +102,9 @@ export function createBot(): Bot {
     `Base URL: ${cfg.PUBLIC_BASE_URL}\nUser ID: ${user.id}\n\n` +
     `1. Create a token: /token\n` +
     `2. Example:\n` +
-    `curl -H "Authorization: Bearer <token>" "${cfg.PUBLIC_BASE_URL}/v1/messages?limit=50"\n\n` +
+    `curl -H "Authorization: Bearer &lt;token&gt;" "${cfg.PUBLIC_BASE_URL}/v1/messages?limit=50"\n\n` +
     `Endpoints: /v1/sources, /v1/topics, /v1/messages, /v1/messages/:id\n` +
-    `CLI: INGEST_API_URL=${cfg.PUBLIC_BASE_URL} INGEST_TOKEN=<token> ingest-cli messages`;
+    `CLI: INGEST_API_URL=${cfg.PUBLIC_BASE_URL} INGEST_TOKEN=&lt;token&gt; ingest-cli messages`;
 
   bot.use(async (ctx, next) => {
     if (!ctx.from) return;
@@ -308,7 +308,7 @@ export function createBot(): Bot {
 
   bot.command('apiinfo', async (ctx) => {
     const user = await currentUser(ctx);
-    await ctx.reply(apiInfoText(user));
+    await ctx.reply(apiInfoText(user), { parse_mode: 'HTML' });
   });
 
   bot.command('whoami', async (ctx) => {
