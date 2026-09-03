@@ -155,6 +155,9 @@ export function Feed() {
             ))}
           </select>
         </label>
+      </div>
+
+      <div className="filter">
         <label>
           From: <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
         </label>
