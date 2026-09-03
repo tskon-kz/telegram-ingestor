@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { loginCode, loginPassword, loginStart, type LoginStep } from '../api';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 type Stage = 'phone' | 'code' | 'password' | 'done';
 
@@ -67,7 +68,10 @@ export function Login() {
 
   return (
     <div className="page narrow">
-      <h1>Connect your Telegram account</h1>
+      <header className="head">
+        <h1>Connect your Telegram account</h1>
+        <ThemeToggle />
+      </header>
       <p className="hint">
         The code is entered here (not in the bot chat) so Telegram does not invalidate it.
       </p>

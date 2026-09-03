@@ -10,6 +10,7 @@ import {
   type Topic,
 } from '../api';
 import { MessageCard } from '../components/MessageCard';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 const ALL = '__all__';
 
@@ -123,6 +124,7 @@ export function Feed() {
     <div className="page">
       <header className="head">
         <h1>My feed</h1>
+        <ThemeToggle />
       </header>
 
       <nav className="tabs">

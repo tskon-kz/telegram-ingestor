@@ -8,6 +8,37 @@
   --accent-soft: #e7f1fb;
   --error: #b00020;
   --ok: #067d3a;
+  color-scheme: light;
+}
+
+/* Manual override: force dark regardless of OS setting. */
+:root[data-theme='dark'] {
+  --bg: #16181c;
+  --card: #202329;
+  --text: #e8eaed;
+  --muted: #9aa0a6;
+  --border: #2c3138;
+  --accent: #4aa3e6;
+  --accent-soft: #21323f;
+  --error: #ff6b6b;
+  --ok: #56cf85;
+  color-scheme: dark;
+}
+
+/* Follow the OS unless the user explicitly picked light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #16181c;
+    --card: #202329;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --border: #2c3138;
+    --accent: #4aa3e6;
+    --accent-soft: #21323f;
+    --error: #ff6b6b;
+    --ok: #56cf85;
+    color-scheme: dark;
+  }
 }
 
 * {
@@ -32,10 +63,28 @@ body {
   max-width: 420px;
 }
 
-.head h1,
-.page.narrow h1 {
-  font-size: 22px;
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
   margin: 8px 0 16px;
+}
+.head h1 {
+  font-size: 22px;
+  margin: 0;
+}
+
+.theme-toggle {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .hint {
