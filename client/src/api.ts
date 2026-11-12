@@ -85,7 +85,31 @@ export async function fetchMessages(params: {
 
 // --- Telegram login (reuses the existing /login/api/* endpoints) ---
 
-export type LoginStep = 'code_sent' | 'password_needed' | 'done';
+export type LoginStep = 'code_sent' | 'qr_pending' | 'password_needed' | 'done';
+
+export type CodeDeliveryType =
+  | 'app'
+  | 'sms'
+  | 'call'
+  | 'flash_call'
+  | 'missed_call'
+  | 'email'
+  | 'fragment'
+  | 'unknown';
+
+export interface CodeDelivery {
+  type: CodeDeliveryType;
+  length?: number;
+  emailPattern?: string;
+  fragmentUrl?: string;
+  nextType?: CodeDeliveryType;
+  timeout?: number;
+}
+
+export interface QrView {
+  step: LoginStep;
+  qr?: { url: string; svg: string; expires: number };
+}
 
 async function loginPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -99,7 +123,22 @@ async function loginPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 export function loginStart(t: string, phone: string) {
-  return loginPost<{ loginId: string; step: LoginStep }>('/login/api/start', { t, phone });
+  return loginPost<{ loginId: string; step: LoginStep; delivery: CodeDelivery }>(
+    '/login/api/start',
+    { t, phone },
+  );
+}
+export function loginResend(t: string, loginId: string) {
+  return loginPost<{ step: LoginStep; delivery: CodeDelivery }>('/login/api/resend', {
+    t,
+    loginId,
+  });
+}
+export function loginQrStart(t: string) {
+  return loginPost<{ loginId: string } & QrView>('/login/api/qr/start', { t });
+}
+export function loginQrPoll(t: string, loginId: string) {
+  return loginPost<QrView>('/login/api/qr/poll', { t, loginId });
 }
 export function loginCode(t: string, loginId: string, code: string) {
   return loginPost<{ step: LoginStep }>('/login/api/code', { t, loginId, code });

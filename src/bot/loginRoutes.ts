@@ -2,7 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { loadConfig } from '../config/index.js';
 import { verifySignedPayload } from '../crypto/index.js';
-import { cancelLogin, startLogin, submitCode, submitPassword } from '../sources/telegram/login.js';
+import {
+  cancelLogin,
+  pollQrLogin,
+  resendCode,
+  startLogin,
+  startQrLogin,
+  submitCode,
+  submitPassword,
+} from '../sources/telegram/login.js';
 
 const loginBindings = new Map<string, string>(); // loginId -> userId
 
@@ -64,6 +72,49 @@ export async function registerLoginRoutes(app: FastifyInstance): Promise<void> {
       const step = await submitPassword(body.data.loginId, body.data.password);
       if (step === 'done') loginBindings.delete(body.data.loginId);
       return { step };
+    } catch (err) {
+      return reply.code(400).send({ error: (err as any)?.errorMessage ?? (err as Error).message });
+    }
+  });
+
+  app.post('/login/api/resend', async (req, reply) => {
+    const body = z.object({ t: z.string(), loginId: z.string() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'invalid input' });
+    if (!authorize(body.data.t, body.data.loginId)) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    try {
+      const delivery = await resendCode(body.data.loginId);
+      return { step: 'code_sent', delivery };
+    } catch (err) {
+      return reply.code(400).send({ error: (err as any)?.errorMessage ?? (err as Error).message });
+    }
+  });
+
+  app.post('/login/api/qr/start', async (req, reply) => {
+    const body = z.object({ t: z.string() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'invalid input' });
+    const userId = verifyToken(body.data.t);
+    if (!userId) return reply.code(401).send({ error: 'invalid or expired link' });
+    try {
+      const view = await startQrLogin(userId);
+      loginBindings.set(view.loginId, userId);
+      return view;
+    } catch (err) {
+      return reply.code(400).send({ error: (err as any)?.errorMessage ?? (err as Error).message });
+    }
+  });
+
+  app.post('/login/api/qr/poll', async (req, reply) => {
+    const body = z.object({ t: z.string(), loginId: z.string() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'invalid input' });
+    if (!authorize(body.data.t, body.data.loginId)) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    try {
+      const view = await pollQrLogin(body.data.loginId);
+      if (view.step === 'done') loginBindings.delete(body.data.loginId);
+      return view;
     } catch (err) {
       return reply.code(400).send({ error: (err as any)?.errorMessage ?? (err as Error).message });
     }
