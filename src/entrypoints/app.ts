@@ -9,7 +9,8 @@ import { getLogger } from '../logging/index.js';
 import { registerApiRoutes } from '../api/app.js';
 import { registerLoginRoutes } from '../bot/loginRoutes.js';
 import { registerPortalRoutes } from '../api/portalRoutes.js';
-import { createBot } from '../bot/index.js';
+import { createBot, notifyAccountConnected } from '../bot/index.js';
+import { setLoginCompletedHandler } from '../sources/telegram/login.js';
 import { closePool } from '../db/pool.js';
 
 // Built client assets (Vite). Resolved from cwd (project root in dev, /app in Docker).
@@ -42,6 +43,7 @@ async function main(): Promise<void> {
   }
 
   const bot = createBot();
+  setLoginCompletedHandler((userId) => notifyAccountConnected(bot, userId));
   // Bot polling runs alongside the HTTP server; a bot failure (bad token,
   // Telegram outage) must not take down the API/login endpoints.
   bot

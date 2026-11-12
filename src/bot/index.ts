@@ -4,7 +4,7 @@ import { loadConfig } from '../config/index.js';
 import { childLogger } from '../logging/index.js';
 import { signPayload } from '../crypto/index.js';
 import { portalUrl } from './portalSession.js';
-import { upsertUser } from '../storage/users.js';
+import { findUserById, upsertUser } from '../storage/users.js';
 import { revokeSession, getSessionMeta } from '../storage/sessions.js';
 import { listSources } from '../storage/sources.js';
 import {
@@ -81,6 +81,22 @@ const MENU_COMMANDS = [
   { command: 'help', description: 'Show all commands' },
 ];
 
+function buildLoginUrl(user: User): string {
+  const cfg = loadConfig();
+  const token = signPayload(user.id, cfg.LOGIN_LINK_SECRET, LOGIN_TTL_MS);
+  return `${cfg.PUBLIC_BASE_URL}/app/login?t=${encodeURIComponent(token)}`;
+}
+
+export async function notifyAccountConnected(bot: Bot, userId: string): Promise<void> {
+  const user = await findUserById(userId);
+  if (!user) return;
+  const view = await accountView(user.id, buildLoginUrl(user), portalUrl(user.id));
+  await bot.api.sendMessage(Number(user.telegramUserId), `✅ Telegram account connected.\n\n${view.text}`, {
+    parse_mode: 'HTML',
+    reply_markup: view.reply_markup,
+  });
+}
+
 async function currentUser(ctx: Context): Promise<User> {
   const from = ctx.from!;
   return upsertUser(BigInt(from.id), from.username ?? null);
@@ -90,10 +106,7 @@ export function createBot(): Bot {
   const cfg = loadConfig();
   const bot = new Bot(cfg.BOT_TOKEN);
 
-  const loginUrl = (user: User): string => {
-    const token = signPayload(user.id, cfg.LOGIN_LINK_SECRET, LOGIN_TTL_MS);
-    return `${cfg.PUBLIC_BASE_URL}/app/login?t=${encodeURIComponent(token)}`;
-  };
+  const loginUrl = buildLoginUrl;
 
   const feedUrl = (user: User): string => portalUrl(user.id);
 

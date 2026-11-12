@@ -58,6 +58,13 @@ export interface QrView {
 
 export class LoginUnavailableError extends Error {}
 
+type LoginCompletedHandler = (userId: string) => Promise<void>;
+let onLoginCompleted: LoginCompletedHandler | null = null;
+
+export function setLoginCompletedHandler(handler: LoginCompletedHandler): void {
+  onLoginCompleted = handler;
+}
+
 setInterval(() => {
   const now = Date.now();
   for (const [id, s] of sessions) {
@@ -296,6 +303,9 @@ async function finalize(loginId: string, s: LoginState): Promise<void> {
   await s.client.disconnect().catch(() => undefined);
   sessions.delete(loginId);
   log.info({ userId: s.userId }, 'login finalized, session stored');
+  onLoginCompleted?.(s.userId).catch((err) =>
+    log.warn({ userId: s.userId, err }, 'login completed notification failed'),
+  );
 }
 
 function mustGet(loginId: string): LoginState {
